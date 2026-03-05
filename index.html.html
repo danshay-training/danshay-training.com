@@ -1377,12 +1377,12 @@ function submitDoc() {
     existing.suitability = suitability;
     existing.location = location;
     existing.versions.push({ v: rev, date: today, by: byName, note: notes, file: fileInput.files[0]?.name || '' });
-    addAuditEntry('REVISION', \`New revision \${rev} uploaded for \${num}\`, num);
+    addAuditEntry('REVISION', `New revision ${rev} uploaded for ${num}`, num);
   } else {
     rev = document.getElementById('doc-rev').value.trim() || 'P01';
     const newDoc = { id: nextId++, num, title, type, rev, status: workflow === 'none' ? 'Draft' : 'Pending', project, location, suitability, date: today, by: byName, notes, versions: [{ v: rev, date: today, by: byName, note: notes, file: fileInput.files[0]?.name || '' }] };
     docs.unshift(newDoc);
-    addAuditEntry('UPLOAD', \`Document \${num} uploaded at revision \${rev}\`, num);
+    addAuditEntry('UPLOAD', `Document ${num} uploaded at revision ${rev}`, num);
   }
 
   closeModal('upload-modal');
@@ -1398,7 +1398,7 @@ function submitDoc() {
   if (fileInput) fileInput.value = '';
 
   const statusMsg = workflow === 'none' ? ' as draft.' : ' & sent for approval.';
-  showToast(isRevision ? \`✅ New revision \${rev} uploaded\${statusMsg}\` : \`✅ Document registered\${statusMsg}\`);
+  showToast(isRevision ? `✅ New revision ${rev} uploaded${statusMsg}` : `✅ Document registered${statusMsg}`);
 }
 
 // ═══════════════════════════════════════════════════════
