@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Danshay Management – EDMS</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -14,6 +15,54 @@
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-height:100vh;}
+
+
+/* ── SUPABASE AUTH BANNER ─────────────────────────────── */
+.auth-mode-banner {
+  background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3);
+  border-radius:4px; padding:8px 14px; font-size:12px; color:var(--blue);
+  margin-bottom:16px; display:flex; align-items:center; gap:8px;
+}
+.supabase-tag {
+  display:inline-flex; align-items:center; gap:4px; font-size:10px;
+  background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.3);
+  border-radius:10px; padding:2px 8px; color:var(--blue); font-weight:700;
+  text-transform:uppercase; letter-spacing:1px;
+}
+.login-mode-tabs { display:flex; gap:0; margin-bottom:20px; border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+.login-mode-tab { flex:1; padding:8px; text-align:center; font-size:12px; font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:1px; cursor:pointer; background:var(--surface2); color:var(--text-dim); transition:all 0.15s; }
+.login-mode-tab.active { background:var(--accent); color:#000; }
+
+/* ── DOCUMENT VIEWER / MARKUP ─────────────────────────── */
+#viewer-modal .modal { width:95vw; max-width:1200px; height:90vh; display:flex; flex-direction:column; }
+#viewer-canvas-wrap {
+  flex:1; overflow:hidden; position:relative; background:#1a1a1a;
+  border:1px solid var(--border); border-radius:4px; cursor:crosshair;
+}
+#viewer-canvas { position:absolute; top:0; left:0; }
+#viewer-overlay { position:absolute; top:0; left:0; cursor:crosshair; }
+.viewer-toolbar {
+  display:flex; align-items:center; gap:6px; padding:10px 0;
+  flex-wrap:wrap; border-bottom:1px solid var(--border); margin-bottom:10px;
+}
+.vtool { padding:6px 10px; background:var(--surface2); border:1px solid var(--border); border-radius:4px; cursor:pointer; font-size:12px; color:var(--text-dim); transition:all 0.15s; white-space:nowrap; }
+.vtool:hover { border-color:var(--accent); color:var(--text); }
+.vtool.active { background:var(--accent); color:#000; border-color:var(--accent); font-weight:700; }
+.vtool-sep { width:1px; height:24px; background:var(--border); margin:0 2px; }
+.viewer-zoom { display:flex; align-items:center; gap:6px; margin-left:auto; }
+.viewer-zoom span { font-size:12px; color:var(--text-dim); min-width:40px; text-align:center; }
+.viewer-info { font-size:11px; color:var(--text-dim); padding:6px 0; }
+.stamp-preview { padding:4px 10px; border-radius:3px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:1px; cursor:pointer; border:2px solid transparent; }
+.stamp-approved { background:rgba(34,197,94,0.15); color:var(--green); border-color:var(--green); }
+.stamp-review   { background:rgba(59,130,246,0.15); color:var(--blue); border-color:var(--blue); }
+.stamp-rejected { background:rgba(239,68,68,0.15); color:var(--red); border-color:var(--red); }
+.stamp-draft    { background:rgba(234,179,8,0.15); color:var(--yellow); border-color:var(--yellow); }
+.annotation-text-input {
+  position:absolute; background:rgba(245,166,35,0.9); color:#000; border:none; outline:none;
+  font-family:'Barlow Condensed',sans-serif; font-size:14px; font-weight:700; padding:4px 6px;
+  border-radius:3px; min-width:120px; z-index:200;
+}
+.viewer-unsupported { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:12px; color:var(--text-dim); }
 
 /* ── LOGIN SCREEN ─────────────────────────────────────────── */
 #login-screen {
@@ -900,6 +949,65 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-
   </div>
 </div>
 
+
+<!-- ══ DOCUMENT VIEWER / MARKUP MODAL ════════════════════ -->
+<div class="modal-overlay" id="viewer-modal" style="display:none" onclick="closeIfOverlay(event,'viewer-modal')">
+  <div class="modal" style="width:95vw;max-width:1200px;height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <h2 id="viewer-title">📄 Document Viewer</h2>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span id="viewer-doc-num" style="font-family:'Barlow Condensed',sans-serif;font-size:12px;color:var(--accent);letter-spacing:1px"></span>
+        <button class="btn btn-ghost btn-sm" onclick="saveAnnotatedImage()" id="viewer-save-btn" style="display:none">💾 Save Markup</button>
+        <button class="close-btn" onclick="closeViewer()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body" style="flex:1;display:flex;flex-direction:column;overflow:hidden;padding:12px 20px">
+      <div class="viewer-toolbar" id="viewer-toolbar">
+        <button class="vtool active" id="tool-pan" onclick="setViewerTool('pan')" title="Pan / Select">✋ Pan</button>
+        <div class="vtool-sep"></div>
+        <button class="vtool" id="tool-pen" onclick="setViewerTool('pen')" title="Freehand draw">✏️ Draw</button>
+        <button class="vtool" id="tool-line" onclick="setViewerTool('line')" title="Draw straight line">📏 Line</button>
+        <button class="vtool" id="tool-rect" onclick="setViewerTool('rect')" title="Draw rectangle">⬜ Rect</button>
+        <button class="vtool" id="tool-circle" onclick="setViewerTool('circle')" title="Draw circle">⭕ Circle</button>
+        <button class="vtool" id="tool-arrow" onclick="setViewerTool('arrow')" title="Draw arrow">➡️ Arrow</button>
+        <button class="vtool" id="tool-text" onclick="setViewerTool('text')" title="Add text annotation">🔤 Text</button>
+        <div class="vtool-sep"></div>
+        <button class="vtool stamp-approved" onclick="placeStamp('APPROVED')" title="Place Approved stamp">✅ APPROVED</button>
+        <button class="vtool stamp-review" onclick="placeStamp('FOR REVIEW')" title="Place For Review stamp">🔵 FOR REVIEW</button>
+        <button class="vtool stamp-rejected" onclick="placeStamp('REJECTED')" title="Place Rejected stamp">❌ REJECTED</button>
+        <button class="vtool stamp-draft" onclick="placeStamp('DRAFT')" title="Place Draft stamp">📝 DRAFT</button>
+        <div class="vtool-sep"></div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="font-size:11px;color:var(--text-dim)">Colour:</span>
+          <input type="color" id="markup-color" value="#f5a623" style="width:28px;height:28px;border:none;border-radius:4px;cursor:pointer;background:none;padding:0">
+        </div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="font-size:11px;color:var(--text-dim)">Size:</span>
+          <select id="markup-size" style="background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px;color:var(--text)">
+            <option value="2">Thin</option>
+            <option value="4" selected>Normal</option>
+            <option value="8">Thick</option>
+          </select>
+        </div>
+        <div class="vtool-sep"></div>
+        <button class="vtool" onclick="undoLastMarkup()" title="Undo last action">↩️ Undo</button>
+        <button class="vtool" onclick="clearAllMarkup()" title="Clear all markup" style="color:var(--red)">🗑️ Clear</button>
+        <div class="viewer-zoom">
+          <button class="vtool" onclick="zoomViewer(-0.2)">➖</button>
+          <span id="zoom-label">100%</span>
+          <button class="vtool" onclick="zoomViewer(0.2)">➕</button>
+          <button class="vtool" onclick="resetZoom()">↺ Fit</button>
+        </div>
+      </div>
+      <div id="viewer-canvas-wrap">
+        <canvas id="viewer-canvas"></canvas>
+        <canvas id="viewer-overlay"></canvas>
+      </div>
+      <div class="viewer-info" id="viewer-info">Tip: Use Pan mode to scroll · Draw mode to annotate · Click stamps to place them</div>
+    </div>
+  </div>
+</div>
+
 <!-- TOAST -->
 <div class="toast" id="toast" style="display:none"></div>
 
@@ -1117,7 +1225,8 @@ function renderDocs(list) {
       <td style="font-size:12px;color:var(--text-dim)">${d.by}</td>
       <td>
         <div class="row-actions">
-          <button class="btn btn-ghost btn-sm" onclick="openDetail(${d.id})">View</button>
+          <button class="btn btn-ghost btn-sm" onclick="openDocViewer(${d.id})">👁 Markup</button>
+          <button class="btn btn-ghost btn-sm" onclick="openDetail(${d.id})">Detail</button>
           ${(d.status==='Pending'||d.status==='Review') && currentUser?.canApprove ? `<button class="btn btn-primary btn-sm" onclick="openApprove(${d.id})">Review</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="openEmailCompose(${d.id})">📧</button>
         </div>
@@ -3252,6 +3361,528 @@ const DEFAULT_FOLDERS = [
 
 // Initialise folder structures for existing projects
 projects.forEach(p => { if (!p.folders || !p.folders.length) p.folders = JSON.parse(JSON.stringify(DEFAULT_FOLDERS)); });
+
+// ═══════════════════════════════════════════════════════
+// SUPABASE CONFIG — replace with your own keys
+// Get free account at https://supabase.com
+// ═══════════════════════════════════════════════════════
+const SUPABASE_URL  = 'YOUR_SUPABASE_URL';   // e.g. https://xxxx.supabase.co
+const SUPABASE_ANON = 'YOUR_SUPABASE_ANON_KEY'; // from Settings > API
+
+let supabaseClient = null;
+let supabaseReady  = false;
+
+function initSupabase() {
+  try {
+    if (typeof supabase !== 'undefined' && SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
+      supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+      supabaseReady  = true;
+      console.log('✅ Supabase initialised');
+    }
+  } catch(e) { console.warn('Supabase init skipped:', e.message); }
+}
+
+// ── LOGIN MODE SWITCHING ──────────────────────────────
+let loginMode = 'demo';
+function switchLoginMode(mode) {
+  loginMode = mode;
+  document.getElementById('tab-demo').classList.toggle('active', mode === 'demo');
+  document.getElementById('tab-real').classList.toggle('active', mode === 'real');
+  document.getElementById('login-demo-section').style.display = mode === 'demo' ? '' : 'none';
+  document.getElementById('login-real-section').style.display = mode === 'real' ? '' : 'none';
+}
+
+function showSignupForm() {
+  document.getElementById('real-login-form').style.display  = 'none';
+  document.getElementById('real-signup-form').style.display = '';
+  document.getElementById('real-reset-form').style.display  = 'none';
+}
+function showLoginForm() {
+  document.getElementById('real-login-form').style.display  = '';
+  document.getElementById('real-signup-form').style.display = 'none';
+  document.getElementById('real-reset-form').style.display  = 'none';
+}
+function showResetForm() {
+  document.getElementById('real-login-form').style.display  = 'none';
+  document.getElementById('real-signup-form').style.display = 'none';
+  document.getElementById('real-reset-form').style.display  = '';
+}
+
+// ── SUPABASE LOGIN ─────────────────────────────────────
+async function doSupabaseLogin() {
+  if (!supabaseReady) {
+    showRealError('Supabase is not configured yet. Add your URL and Anon Key to the HTML file.');
+    return;
+  }
+  const email = document.getElementById('real-email').value.trim();
+  const pass  = document.getElementById('real-pass').value;
+  if (!email || !pass) { showRealError('Please enter your email and password.'); return; }
+  const btn = document.getElementById('real-login-btn');
+  btn.textContent = 'Signing in…'; btn.disabled = true;
+  try {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pass });
+    if (error) { showRealError(error.message); btn.textContent = 'Sign In →'; btn.disabled = false; return; }
+    const user = data.user;
+    const meta = user.user_metadata || {};
+    // Build currentUser from Supabase metadata
+    currentUser = {
+      id: user.id,
+      name: meta.full_name || email.split('@')[0],
+      email: user.email,
+      initials: (meta.full_name || email).split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase(),
+      role: meta.role || 'viewer',
+      title: meta.title || 'Team Member',
+      color: meta.color || '#3b82f6',
+      canUpload: meta.canUpload !== false,
+      canApprove: meta.canApprove || false,
+      isSupabaseUser: true
+    };
+    addAuditEntry('LOGIN', 'User ' + currentUser.name + ' signed in via Supabase', '—');
+    launchApp();
+  } catch(e) {
+    showRealError('Login failed: ' + e.message);
+    btn.textContent = 'Sign In →'; btn.disabled = false;
+  }
+}
+
+async function doSupabaseSignup() {
+  if (!supabaseReady) { showRealError('Supabase is not configured yet.'); return; }
+  const name  = document.getElementById('real-signup-name').value.trim();
+  const email = document.getElementById('real-signup-email').value.trim();
+  const pass  = document.getElementById('real-signup-pass').value;
+  if (!name || !email || !pass) { showRealError('All fields are required.'); return; }
+  if (pass.length < 6) { showRealError('Password must be at least 6 characters.'); return; }
+  try {
+    const { error } = await supabaseClient.auth.signUp({
+      email, password: pass,
+      options: { data: { full_name: name, role: 'viewer', canUpload: true, canApprove: false, color: '#3b82f6' } }
+    });
+    if (error) { showRealError(error.message); return; }
+    const errEl = document.getElementById('login-error-real');
+    errEl.style.display = 'block';
+    errEl.style.background = 'rgba(34,197,94,0.1)';
+    errEl.style.borderColor = 'rgba(34,197,94,0.3)';
+    errEl.style.color = 'var(--green)';
+    errEl.textContent = '✅ Account created! Check your email to confirm, then sign in.';
+    showLoginForm();
+  } catch(e) { showRealError('Sign up failed: ' + e.message); }
+}
+
+async function doPasswordReset() {
+  if (!supabaseReady) { showRealError('Supabase is not configured yet.'); return; }
+  const email = document.getElementById('real-reset-email').value.trim();
+  if (!email) { showRealError('Please enter your email address.'); return; }
+  try {
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
+    if (error) { showRealError(error.message); return; }
+    const errEl = document.getElementById('login-error-real');
+    errEl.style.display = 'block';
+    errEl.style.background = 'rgba(34,197,94,0.1)';
+    errEl.style.borderColor = 'rgba(34,197,94,0.3)';
+    errEl.style.color = 'var(--green)';
+    errEl.textContent = '✅ Reset email sent! Check your inbox.';
+  } catch(e) { showRealError('Reset failed: ' + e.message); }
+}
+
+function showRealError(msg) {
+  const el = document.getElementById('login-error-real');
+  el.style.display = 'block';
+  el.style.background = 'rgba(239,68,68,0.1)';
+  el.style.borderColor = 'rgba(239,68,68,0.3)';
+  el.style.color = 'var(--red)';
+  el.textContent = msg;
+}
+
+function launchApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display   = 'flex';
+  const u = currentUser;
+  document.getElementById('user-name-display').textContent  = u.name;
+  document.getElementById('user-role-display').textContent  = u.role;
+  document.getElementById('user-avatar').style.background   = u.color;
+  document.getElementById('user-avatar').textContent        = u.initials;
+  if (!u.canUpload) document.getElementById('btn-upload').style.display = 'none';
+  const adminNavItems = ['nav-users','nav-admin'];
+  adminNavItems.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = u.role === 'admin' ? '' : 'none';
+  });
+  updateApprovalCount();
+  updateProjectDropdowns();
+  showDocView('docs');
+}
+
+// ═══════════════════════════════════════════════════════
+// RFI FIX — ensure modal opens correctly
+// ═══════════════════════════════════════════════════════
+function openRFIModal() {
+  const sel = document.getElementById('rfi-project');
+  if (sel) sel.innerHTML = projects.map(p => '<option value="' + p.name + '">' + p.name + '</option>').join('');
+  const numEl = document.getElementById('rfi-num');
+  if (numEl) numEl.value = 'RFI-' + String(nextRFINum).padStart(3,'0');
+  ['rfi-title','rfi-to','rfi-desc','rfi-refs'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const dueEl = document.getElementById('rfi-due'); if (dueEl) dueEl.value = '';
+  const priEl = document.getElementById('rfi-priority'); if (priEl) priEl.value = 'Normal';
+  const modal = document.getElementById('rfi-modal');
+  if (modal) modal.style.display = 'flex';
+  else showToast('⚠️ RFI modal not found — please refresh.');
+}
+
+// ═══════════════════════════════════════════════════════
+// DOCUMENT VIEWER + ANNOTATION ENGINE
+// ═══════════════════════════════════════════════════════
+let viewerDoc       = null;
+let viewerZoom      = 1.0;
+let viewerTool      = 'pan';
+let markupHistory   = [];   // array of ImageData snapshots for undo
+let isDrawing       = false;
+let drawStart       = { x:0, y:0 };
+let lastPos         = { x:0, y:0 };
+let penPath         = [];
+let viewerCanvas, viewerOverlay, vctx, octx;
+let panOffset       = { x:0, y:0 };
+let panStart        = null;
+let activeTextInput = null;
+
+function openDocViewer(docId) {
+  viewerDoc = docs.find(d => d.id === docId);
+  if (!viewerDoc) return;
+  document.getElementById('viewer-title').textContent  = viewerDoc.title.length > 50 ? viewerDoc.title.slice(0,50)+'…' : viewerDoc.title;
+  document.getElementById('viewer-doc-num').textContent = viewerDoc.num + ' · ' + viewerDoc.rev;
+  document.getElementById('viewer-modal').style.display = 'flex';
+  viewerCanvas  = document.getElementById('viewer-canvas');
+  viewerOverlay = document.getElementById('viewer-overlay');
+  vctx = viewerCanvas.getContext('2d');
+  octx = viewerOverlay.getContext('2d');
+  markupHistory = [];
+  viewerZoom    = 1.0;
+  panOffset     = { x:0, y:0 };
+  setViewerTool('pan');
+
+  const ext = (viewerDoc.fileExt || '').toLowerCase();
+  const unsupportedTypes = ['dwg','dxf','rvt','ifc','dgn'];
+
+  if (unsupportedTypes.includes(ext)) {
+    renderUnsupportedViewer(ext);
+    return;
+  }
+
+  if (viewerDoc.fileData) {
+    // Real file was uploaded — render it
+    loadFileIntoViewer(viewerDoc.fileData, viewerDoc.fileType || 'application/octet-stream');
+  } else {
+    // No real file — render a placeholder document
+    renderPlaceholderDoc(viewerDoc);
+  }
+
+  attachViewerEvents();
+  addAuditEntry('VIEW', 'Document viewed with markup tool: ' + viewerDoc.title, viewerDoc.num);
+}
+
+function renderPlaceholderDoc(doc) {
+  const wrap = document.getElementById('viewer-canvas-wrap');
+  const W = wrap.clientWidth || 900;
+  const H = wrap.clientHeight || 600;
+  viewerCanvas.width  = W; viewerCanvas.height  = H;
+  viewerOverlay.width = W; viewerOverlay.height = H;
+  viewerCanvas.style.width  = W+'px'; viewerCanvas.style.height  = H+'px';
+  viewerOverlay.style.width = W+'px'; viewerOverlay.style.height = H+'px';
+  // Draw document placeholder
+  vctx.fillStyle = '#f8f8f0';
+  vctx.fillRect(0, 0, W, H);
+  // Header bar
+  vctx.fillStyle = '#1a1a1a';
+  vctx.fillRect(0, 0, W, 60);
+  vctx.fillStyle = '#f5a623';
+  vctx.font = 'bold 18px Barlow Condensed, sans-serif';
+  vctx.fillText('DANSHAY MANAGEMENT', 20, 22);
+  vctx.fillStyle = '#aaa';
+  vctx.font = '11px Barlow, sans-serif';
+  vctx.fillText(doc.num + '  |  Rev: ' + doc.rev + '  |  Status: ' + doc.status + '  |  Date: ' + doc.date, 20, 42);
+  // Title
+  vctx.fillStyle = '#222';
+  vctx.font = 'bold 22px Barlow Condensed, sans-serif';
+  vctx.fillText(doc.title, 40, 100);
+  // Divider
+  vctx.strokeStyle = '#ccc'; vctx.lineWidth = 1;
+  vctx.beginPath(); vctx.moveTo(40, 115); vctx.lineTo(W-40, 115); vctx.stroke();
+  // Content placeholder lines
+  vctx.fillStyle = '#bbb';
+  for (let i=0; i<18; i++) {
+    const w = (Math.random() * 0.4 + 0.4) * (W - 80);
+    vctx.fillRect(40, 135 + i*26, w, 10);
+  }
+  // Watermark
+  vctx.save();
+  vctx.globalAlpha = 0.04;
+  vctx.font = 'bold 80px Barlow Condensed, sans-serif';
+  vctx.fillStyle = '#000';
+  vctx.translate(W/2, H/2);
+  vctx.rotate(-Math.PI/6);
+  vctx.fillText('DANSHAY EDMS', -200, 0);
+  vctx.restore();
+  // Title block bottom right
+  const tbX = W-260, tbY = H-120;
+  vctx.strokeStyle = '#999'; vctx.lineWidth = 0.8;
+  vctx.strokeRect(tbX, tbY, 220, 100);
+  vctx.fillStyle = '#333'; vctx.font = 'bold 10px Barlow, sans-serif';
+  vctx.fillText('PROJECT', tbX+8, tbY+16);
+  vctx.fillStyle = '#111'; vctx.font = '10px Barlow, sans-serif';
+  vctx.fillText(doc.project, tbX+8, tbY+30);
+  vctx.fillStyle = '#333'; vctx.font = 'bold 10px Barlow, sans-serif';
+  vctx.fillText('DOCUMENT NUMBER', tbX+8, tbY+50);
+  vctx.fillStyle = '#f5a623'; vctx.font = 'bold 13px Barlow Condensed, sans-serif';
+  vctx.fillText(doc.num, tbX+8, tbY+66);
+  vctx.fillStyle = '#333'; vctx.font = 'bold 10px Barlow, sans-serif';
+  vctx.fillText('REVISION', tbX+8, tbY+82);
+  vctx.fillStyle = '#111'; vctx.font = '10px Barlow, sans-serif';
+  vctx.fillText(doc.rev + '  –  ' + doc.status, tbX+8, tbY+96);
+  document.getElementById('viewer-save-btn').style.display = '';
+  document.getElementById('viewer-info').textContent = '📋 Placeholder view — upload the actual file to see the document content. Use the toolbar above to add markup and annotations.';
+}
+
+function loadFileIntoViewer(dataUrl, mimeType) {
+  const wrap = document.getElementById('viewer-canvas-wrap');
+  const W = wrap.clientWidth || 900;
+  const H = wrap.clientHeight || 600;
+  if (mimeType.startsWith('image/')) {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(W/img.width, H/img.height, 1);
+      const dw = img.width * scale, dh = img.height * scale;
+      viewerCanvas.width  = W; viewerCanvas.height  = H;
+      viewerOverlay.width = W; viewerOverlay.height = H;
+      viewerCanvas.style.width  = W+'px'; viewerCanvas.style.height = H+'px';
+      viewerOverlay.style.width = W+'px'; viewerOverlay.style.height = H+'px';
+      vctx.fillStyle = '#222'; vctx.fillRect(0,0,W,H);
+      const ox=(W-dw)/2, oy=(H-dh)/2;
+      vctx.drawImage(img, ox, oy, dw, dh);
+      document.getElementById('viewer-save-btn').style.display = '';
+    };
+    img.src = dataUrl;
+  } else {
+    renderPlaceholderDoc(viewerDoc);
+  }
+}
+
+function renderUnsupportedViewer(ext) {
+  const wrap = document.getElementById('viewer-canvas-wrap');
+  const W = wrap.clientWidth || 900;
+  const H = wrap.clientHeight || 600;
+  viewerCanvas.width  = W; viewerCanvas.height = H;
+  viewerOverlay.width = W; viewerOverlay.height = H;
+  vctx.fillStyle = '#1a1a1a'; vctx.fillRect(0,0,W,H);
+  vctx.fillStyle = '#555'; vctx.font = '48px sans-serif';
+  vctx.textAlign = 'center';
+  vctx.fillText('🏗️', W/2, H/2 - 40);
+  vctx.fillStyle = '#888'; vctx.font = 'bold 18px Barlow Condensed, sans-serif';
+  vctx.fillText('.' + ext.toUpperCase() + ' files require specialist software', W/2, H/2 + 10);
+  vctx.fillStyle = '#555'; vctx.font = '13px Barlow, sans-serif';
+  vctx.fillText('For DWG/DXF use AutoCAD · For RVT/IFC use Revit or BIM 360 · For DGN use MicroStation', W/2, H/2 + 36);
+  vctx.textAlign = 'left';
+  document.getElementById('viewer-info').textContent = '⚠️ CAD/BIM files cannot be rendered in the browser — download the file to open in the appropriate software.';
+}
+
+function setViewerTool(tool) {
+  viewerTool = tool;
+  document.querySelectorAll('.vtool[id^="tool-"]').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('tool-' + tool);
+  if (btn) btn.classList.add('active');
+  if (viewerOverlay) viewerOverlay.style.cursor = tool === 'pan' ? 'grab' : 'crosshair';
+}
+
+function attachViewerEvents() {
+  const ov = document.getElementById('viewer-overlay');
+  if (!ov) return;
+  ov.onmousedown = viewerMouseDown;
+  ov.onmousemove = viewerMouseMove;
+  ov.onmouseup   = viewerMouseUp;
+  ov.onmouseleave = () => { if (isDrawing) viewerMouseUp({offsetX:lastPos.x, offsetY:lastPos.y}); };
+  ov.ontouchstart = (e) => { e.preventDefault(); const t=e.touches[0]; viewerMouseDown({offsetX:t.clientX-ov.getBoundingClientRect().left, offsetY:t.clientY-ov.getBoundingClientRect().top, button:0}); };
+  ov.ontouchmove  = (e) => { e.preventDefault(); const t=e.touches[0]; viewerMouseMove({offsetX:t.clientX-ov.getBoundingClientRect().left, offsetY:t.clientY-ov.getBoundingClientRect().top}); };
+  ov.ontouchend   = (e) => { e.preventDefault(); viewerMouseUp({}); };
+}
+
+function getMarkupStyle() {
+  return {
+    color: document.getElementById('markup-color')?.value || '#f5a623',
+    size:  parseInt(document.getElementById('markup-size')?.value || '4')
+  };
+}
+
+function viewerMouseDown(e) {
+  const { x, y } = { x: e.offsetX, y: e.offsetY };
+  if (viewerTool === 'pan') { panStart = { x, y, ox: panOffset.x, oy: panOffset.y }; viewerOverlay.style.cursor='grabbing'; return; }
+  if (viewerTool === 'text') { placeTextInput(x, y); return; }
+  isDrawing = true;
+  drawStart = { x, y }; lastPos = { x, y }; penPath = [{ x, y }];
+  saveMarkupState();
+}
+
+function viewerMouseMove(e) {
+  const { x, y } = { x: e.offsetX, y: e.offsetY };
+  if (viewerTool === 'pan' && panStart) {
+    panOffset.x = panStart.ox + (x - panStart.x);
+    panOffset.y = panStart.oy + (y - panStart.y);
+    viewerCanvas.style.transform  = 'translate('+panOffset.x+'px,'+panOffset.y+'px) scale('+viewerZoom+')';
+    viewerOverlay.style.transform = viewerCanvas.style.transform;
+    return;
+  }
+  if (!isDrawing) return;
+  const s = getMarkupStyle();
+  octx.clearRect(0, 0, viewerOverlay.width, viewerOverlay.height);
+  octx.strokeStyle = s.color; octx.lineWidth = s.size; octx.lineCap = 'round';
+  if (viewerTool === 'pen') {
+    penPath.push({ x, y });
+    octx.beginPath(); octx.moveTo(penPath[0].x, penPath[0].y);
+    penPath.forEach(p => octx.lineTo(p.x, p.y));
+    octx.stroke();
+  } else if (viewerTool === 'line') {
+    octx.beginPath(); octx.moveTo(drawStart.x, drawStart.y); octx.lineTo(x, y); octx.stroke();
+  } else if (viewerTool === 'rect') {
+    octx.strokeRect(drawStart.x, drawStart.y, x-drawStart.x, y-drawStart.y);
+  } else if (viewerTool === 'circle') {
+    const rx = Math.abs(x-drawStart.x)/2, ry = Math.abs(y-drawStart.y)/2;
+    const cx = (drawStart.x+x)/2, cy = (drawStart.y+y)/2;
+    octx.beginPath(); octx.ellipse(cx, cy, rx, ry, 0, 0, 2*Math.PI); octx.stroke();
+  } else if (viewerTool === 'arrow') {
+    drawArrow(octx, drawStart.x, drawStart.y, x, y, s.size, s.color);
+  }
+  lastPos = { x, y };
+}
+
+function viewerMouseUp(e) {
+  if (viewerTool === 'pan') { panStart = null; viewerOverlay.style.cursor='grab'; return; }
+  if (!isDrawing) return;
+  isDrawing = false;
+  // Commit overlay to main canvas
+  vctx.drawImage(viewerOverlay, 0, 0);
+  octx.clearRect(0, 0, viewerOverlay.width, viewerOverlay.height);
+  penPath = [];
+}
+
+function drawArrow(ctx, x1, y1, x2, y2, size, color) {
+  const angle = Math.atan2(y2-y1, x2-x1);
+  const headLen = size * 4 + 10;
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = size;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - headLen*Math.cos(angle-Math.PI/7), y2 - headLen*Math.sin(angle-Math.PI/7));
+  ctx.lineTo(x2 - headLen*Math.cos(angle+Math.PI/7), y2 - headLen*Math.sin(angle+Math.PI/7));
+  ctx.closePath(); ctx.fill();
+}
+
+function placeTextInput(x, y) {
+  if (activeTextInput) activeTextInput.remove();
+  const wrap = document.getElementById('viewer-canvas-wrap');
+  const inp = document.createElement('input');
+  inp.className = 'annotation-text-input';
+  inp.style.left = x+'px'; inp.style.top = y+'px';
+  inp.placeholder = 'Type annotation...';
+  inp.style.color = document.getElementById('markup-color')?.value || '#f5a623';
+  wrap.appendChild(inp);
+  inp.focus();
+  activeTextInput = inp;
+  inp.onkeydown = (e) => {
+    if (e.key === 'Enter') commitTextAnnotation(inp, x, y);
+    if (e.key === 'Escape') { inp.remove(); activeTextInput = null; }
+  };
+  inp.onblur = () => { if (inp.value.trim()) commitTextAnnotation(inp, x, y); else inp.remove(); activeTextInput = null; };
+}
+
+function commitTextAnnotation(inp, x, y) {
+  const text = inp.value.trim();
+  const color = inp.style.color || '#f5a623';
+  inp.remove(); activeTextInput = null;
+  if (!text) return;
+  saveMarkupState();
+  const size = parseInt(document.getElementById('markup-size')?.value || '4');
+  vctx.fillStyle = color;
+  vctx.font = 'bold ' + (10 + size*2) + 'px Barlow Condensed, sans-serif';
+  vctx.fillText(text, x, y);
+}
+
+function placeStamp(label) {
+  setViewerTool('pan');
+  const W = viewerCanvas.width, H = viewerCanvas.height;
+  const cx = W/2, cy = H/2;
+  const colors = { 'APPROVED':'#22c55e', 'FOR REVIEW':'#3b82f6', 'REJECTED':'#ef4444', 'DRAFT':'#eab308' };
+  const col = colors[label] || '#f5a623';
+  saveMarkupState();
+  vctx.save();
+  vctx.strokeStyle = col; vctx.lineWidth = 4;
+  vctx.globalAlpha = 0.85;
+  const tw = label.length * 22 + 30, th = 50;
+  const sx = cx - tw/2, sy = cy - th/2;
+  vctx.strokeRect(sx, sy, tw, th);
+  vctx.fillStyle = col;
+  vctx.font = 'bold 28px Barlow Condensed, sans-serif';
+  vctx.textAlign = 'center';
+  vctx.fillText(label, cx, cy+10);
+  vctx.textAlign = 'left';
+  vctx.restore();
+  showToast('🖊 Stamp placed: ' + label);
+}
+
+function saveMarkupState() {
+  markupHistory.push(vctx.getImageData(0, 0, viewerCanvas.width, viewerCanvas.height));
+  if (markupHistory.length > 30) markupHistory.shift();
+}
+
+function undoLastMarkup() {
+  if (markupHistory.length < 2) { showToast('Nothing to undo.'); return; }
+  markupHistory.pop();
+  vctx.putImageData(markupHistory[markupHistory.length-1], 0, 0);
+}
+
+function clearAllMarkup() {
+  if (!confirm('Clear all markup and annotations?')) return;
+  markupHistory = [];
+  renderPlaceholderDoc(viewerDoc);
+}
+
+function zoomViewer(delta) {
+  viewerZoom = Math.min(Math.max(viewerZoom + delta, 0.3), 4.0);
+  const t = 'translate('+panOffset.x+'px,'+panOffset.y+'px) scale('+viewerZoom+')';
+  viewerCanvas.style.transform  = t;
+  viewerOverlay.style.transform = t;
+  document.getElementById('zoom-label').textContent = Math.round(viewerZoom*100)+'%';
+}
+
+function resetZoom() {
+  viewerZoom = 1.0; panOffset = {x:0,y:0};
+  const t = 'translate(0,0) scale(1)';
+  viewerCanvas.style.transform  = t;
+  viewerOverlay.style.transform = t;
+  document.getElementById('zoom-label').textContent = '100%';
+}
+
+function saveAnnotatedImage() {
+  const merged = document.createElement('canvas');
+  merged.width  = viewerCanvas.width;
+  merged.height = viewerCanvas.height;
+  const mctx = merged.getContext('2d');
+  mctx.drawImage(viewerCanvas, 0, 0);
+  mctx.drawImage(viewerOverlay, 0, 0);
+  const link = document.createElement('a');
+  link.download = (viewerDoc?.num || 'document') + '_markup.png';
+  link.href = merged.toDataURL('image/png');
+  link.click();
+  addAuditEntry('DOWNLOAD', 'Markup saved: ' + viewerDoc?.title, viewerDoc?.num || '');
+  showToast('💾 Marked-up image saved as PNG.');
+}
+
+function closeViewer() {
+  if (activeTextInput) { activeTextInput.remove(); activeTextInput = null; }
+  closeModal('viewer-modal');
+  markupHistory = []; viewerDoc = null;
+}
+
+// ── INIT ──────────────────────────────────────────────
+initSupabase();
 
 // INIT
 buildLoginPills();
